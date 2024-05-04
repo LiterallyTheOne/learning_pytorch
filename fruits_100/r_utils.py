@@ -1,18 +1,24 @@
+import time
+
 import torch
 from torch import nn
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 import torchvision
 
-import pandas as pd
+from torchvision.transforms import v2
 
 from pathlib import Path
 
 from PIL import Image
 
+import pandas as pd
 
-def prepare_and_get_data_path(where_is_running: str = 'colab'):
+import multiprocessing
+
+
+def prepare_and_get_data_path(where_is_running: str = 'colab') -> Path:
     match where_is_running:
         case 'colab':
             from google.colab import userdata
@@ -25,7 +31,7 @@ def prepare_and_get_data_path(where_is_running: str = 'colab'):
             with open(kaggle_target_path, 'w') as f:
                 f.write(userdata.get('Kaggle'))
 
-            os.system('kaggle datasets download -d fruits-100')
+            os.system('kaggle datasets download -d marquis03/fruits-100')
             os.system('unzip -q fruits-100.zip -d fruits-100')
             os.system('rm -r fruits-100.zip')
 
@@ -35,7 +41,7 @@ def prepare_and_get_data_path(where_is_running: str = 'colab'):
             data_path = Path(
                 '/home/ramin/ramin_programs/files/datasets/fruits-100')
 
-        case 'kaggle':
+        case _:
             data_path = Path('fruits-100')
 
     return data_path
@@ -52,33 +58,52 @@ def find_device():
     return device
 
 
-def load_data(data_path: Path) -> tuple[DataLoader, DataLoader]:
-    train_data_path = data_path / 'train'
-    valid_data_path = data_path / 'val'
-
-    tr = torchvision.transforms.Compose(
-        [torchvision.transforms.Resize(
-            [90, 160]), torchvision.transforms.ToTensor(), ]
+def load_train_data(data_path: Path) -> DataLoader:
+    tr = v2.Compose([
+        v2.Resize([90, 160]),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True), ]
     )
 
-    train_image_folder = torchvision.datasets.ImageFolder(
-        train_data_path, transform=tr)
-    valid_image_folder = torchvision.datasets.ImageFolder(
-        valid_data_path, transform=tr)
+    tr_augmented = v2.Compose(
+        [v2.RandomHorizontalFlip(),
+         v2.RandomVerticalFlip(),
+         v2.RandomZoomOut(),
+         v2.Resize([90, 160]),
+         v2.ToImage(),
+         v2.ToDtype(torch.float32, scale=True), ]
+    )
 
-    train_data_loader = DataLoader(
-        train_image_folder, batch_size=32, shuffle=True)
-    val_data_loader = DataLoader(
-        valid_image_folder, batch_size=32, shuffle=True)
+    image_folder = torchvision.datasets.ImageFolder(data_path, transform=tr)
 
-    return train_data_loader, val_data_loader
+    image_folder_augmented = torchvision.datasets.ImageFolder(data_path, transform=tr_augmented)
+
+    both_d = ConcatDataset([image_folder, image_folder_augmented])
+
+    data_loader = DataLoader(both_d, batch_size=32, shuffle=True, num_workers=multiprocessing.cpu_count())
+
+    return data_loader
+
+
+def load_valid_data(data_path: Path) -> DataLoader:
+    tr = v2.Compose([
+        v2.Resize([90, 160]),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, True), ]
+    )
+
+    valid_image_folder = torchvision.datasets.ImageFolder(data_path, transform=tr)
+
+    val_data_loader = DataLoader(valid_image_folder, batch_size=32, shuffle=True)
+
+    return val_data_loader
 
 
 def load_model(device: str = 'cuda') -> nn.Module:
     model = torchvision.models.mobilenet_v2(
         weights=torchvision.models.MobileNet_V2_Weights.IMAGENET1K_V1)
-    for param in model.parameters():
-        param.requires_grad = False
+    # for param in model.parameters():
+    #     param.requires_grad = False
 
     model.classifier[1] = nn.Linear(1280, 100)
     model = model.to(device)
@@ -95,6 +120,7 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
     i_c = 0
     number_of_batches = len(data_loader)
 
+    t1 = time.time()
     for i, (images, labels) in enumerate(data_loader):
         images = images.to(device)
         labels = labels.to(device)
@@ -108,15 +134,17 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
         optimizer.step()
 
         running_loss += loss.item()
+        running_loss += 1
         i_c += 1
         if (i % 10 == 9) or i == number_of_batches - 1:
-            print(
-                f'\r{i + 1}/{number_of_batches}, loss = {loss.item():>4f}', end='')
+            print(f'\r{i + 1}/{number_of_batches}, loss = {loss.item():>4f}, time each batch: {time.time() - t1}',
+                  end='')
+            # print(f'\r{i + 1}/{number_of_batches}, loss = {0:>4f}', end='')
             if tensorboard_writer:
-                tensorboard_writer.add_scalar(
-                    'training loss', running_loss / i_c, epoch * number_of_batches + i)
+                tensorboard_writer.add_scalar('training loss', running_loss / i_c, epoch * number_of_batches + i)
             running_loss = 0
             i_c = 0
+            t1 = time.time()
     print()
 
 
@@ -139,8 +167,7 @@ def evaluate(model: nn.Module,
 
             prediction = model(images)
             loss += loss_fn(prediction, labels).item()
-            correct += (prediction.argmax(1) ==
-                        labels).type(torch.float).sum().item()
+            correct += (prediction.argmax(1) == labels).type(torch.float).sum().item()
 
         loss /= number_of_batches
         correct /= data_size
@@ -154,8 +181,10 @@ def predict(model: nn.Module,
     model = model.to(device)
     model.eval()
 
-    tr = torchvision.transforms.Compose(
-        [torchvision.transforms.Resize([90, 160]), torchvision.transforms.ToTensor(), ]
+    tr = v2.Compose(
+        [v2.Resize([90, 160]),
+         v2.ToImage(),
+         v2.ToDtype(torch.float32, True), ]
     )
 
     image_paths = test_data_path.rglob('*.jpg')
@@ -173,7 +202,7 @@ def predict(model: nn.Module,
                 prediction = model(image_tensor)
             prediction = torch.argmax(prediction)
 
-            result['image_path'].append(image_path)
+            result['image_path'].append(f'{image_path.parent.name} / f{image_path.name}')
             result['prediction'].append(prediction.detach().cpu().numpy())
 
     return pd.DataFrame(result)
