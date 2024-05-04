@@ -112,13 +112,15 @@ def load_model(device: str = 'cuda') -> nn.Module:
 
 
 def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimizer: torch.optim.Optimizer,
-          device: str = 'cuda', tensorboard_writer=None, epoch: int = 0):
+          device: str = 'cuda', tensorboard_writer=None, epoch: int = 0) -> list[float]:
     model = model.to(device)
     model.train()
 
     running_loss = 0
     i_c = 0
     number_of_batches = len(data_loader)
+
+    losses = []
 
     t1 = time.time()
     for i, (images, labels) in enumerate(data_loader):
@@ -134,7 +136,6 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
         optimizer.step()
 
         running_loss += loss.item()
-        running_loss += 1
         i_c += 1
         if (i % 10 == 9) or i == number_of_batches - 1:
             time_taken = time.time() - t1
@@ -144,10 +145,13 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
                 end='')
             if tensorboard_writer:
                 tensorboard_writer.add_scalar('training loss', running_loss / i_c, epoch * number_of_batches + i)
+            losses.append(running_loss / i_c)
             running_loss = 0
             i_c = 0
             t1 = time.time()
     print()
+
+    return losses
 
 
 def evaluate(model: nn.Module,

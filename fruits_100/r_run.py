@@ -29,11 +29,15 @@ def main():
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters())
     #
-    for epoch in range(5):
+    losses = []
+    for epoch in range(1):
         print(f'in epoch: {epoch}')
-        train(model, train_data_loader, loss_fn, optimizer, device)
+        losses = train(model, train_data_loader, loss_fn, optimizer, device)
         accuracy, loss = evaluate(model, valid_data_loader, loss_fn, device)
         print(f'validation -> accuracy: {accuracy:.2f}, loss: {loss:.2f}')
+
+    plt.plot(losses)
+    plt.show()
 
     # haha = Path('/home/ramin/ramin_programs/files/datasets/fruits-100/test/0/0.jpg')
     #
