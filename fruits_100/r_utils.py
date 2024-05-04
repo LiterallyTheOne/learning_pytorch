@@ -137,9 +137,11 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
         running_loss += 1
         i_c += 1
         if (i % 10 == 9) or i == number_of_batches - 1:
-            print(f'\r{i + 1}/{number_of_batches}, loss = {loss.item():>4f}, time each batch: {time.time() - t1}',
-                  end='')
-            # print(f'\r{i + 1}/{number_of_batches}, loss = {0:>4f}', end='')
+            time_taken = time.time() - t1
+            print(
+                f'\r{i + 1}/{number_of_batches}, loss = {loss.item():>4f}, time_taken: {time_taken:.2f}'
+                f', predicting_remaining_time: {(time_taken / i_c) * (number_of_batches - i):.2f}',
+                end='')
             if tensorboard_writer:
                 tensorboard_writer.add_scalar('training loss', running_loss / i_c, epoch * number_of_batches + i)
             running_loss = 0
