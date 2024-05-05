@@ -76,11 +76,13 @@ def load_train_data(data_path: Path) -> DataLoader:
 
     image_folder = torchvision.datasets.ImageFolder(data_path, transform=tr)
 
-    image_folder_augmented = torchvision.datasets.ImageFolder(data_path, transform=tr_augmented)
+    image_folder_augmented = torchvision.datasets.ImageFolder(
+        data_path, transform=tr_augmented)
 
     both_d = ConcatDataset([image_folder, image_folder_augmented])
 
-    data_loader = DataLoader(both_d, batch_size=32, shuffle=True, num_workers=multiprocessing.cpu_count())
+    data_loader = DataLoader(
+        both_d, batch_size=32, shuffle=True, num_workers=multiprocessing.cpu_count())
 
     return data_loader
 
@@ -92,9 +94,11 @@ def load_valid_data(data_path: Path) -> DataLoader:
         v2.ToDtype(torch.float32, True), ]
     )
 
-    valid_image_folder = torchvision.datasets.ImageFolder(data_path, transform=tr)
+    valid_image_folder = torchvision.datasets.ImageFolder(
+        data_path, transform=tr)
 
-    val_data_loader = DataLoader(valid_image_folder, batch_size=32, shuffle=True)
+    val_data_loader = DataLoader(
+        valid_image_folder, batch_size=32, shuffle=True)
 
     return val_data_loader
 
@@ -102,8 +106,8 @@ def load_valid_data(data_path: Path) -> DataLoader:
 def load_model(device: str = 'cuda') -> nn.Module:
     model = torchvision.models.mobilenet_v2(
         weights=torchvision.models.MobileNet_V2_Weights.IMAGENET1K_V1)
-    # for param in model.parameters():
-    #     param.requires_grad = False
+    for param in model.parameters():
+        param.requires_grad = False
 
     model.classifier[1] = nn.Linear(1280, 100)
     model = model.to(device)
@@ -139,12 +143,18 @@ def train(model: nn.Module, data_loader: DataLoader, loss_fn: nn.Module, optimiz
         i_c += 1
         if (i % 10 == 9) or i == number_of_batches - 1:
             time_taken = time.time() - t1
+            remaining_time = (time_taken / i_c) * (number_of_batches - i)
+            remaining_minutes = int(remaining_time // 60)
+            remaining_seconds = int(remaining_time % 60)
             print(
-                f'\r{i + 1}/{number_of_batches}, loss = {loss.item():>4f}, time_taken: {time_taken:.2f}'
-                f', predicting_remaining_time: {(time_taken / i_c) * (number_of_batches - i):.2f}',
+                f'\r{i + 1}/{number_of_batches}, loss = {loss.item()
+                :>4f}, time_taken: {time_taken:.2f}'
+                f', predicting_remaining_time: {
+                remaining_minutes:d}m {remaining_seconds:02d}s',
                 end='')
             if tensorboard_writer:
-                tensorboard_writer.add_scalar('training loss', running_loss / i_c, epoch * number_of_batches + i)
+                tensorboard_writer.add_scalar(
+                    'training loss', running_loss / i_c, epoch * number_of_batches + i)
             losses.append(running_loss / i_c)
             running_loss = 0
             i_c = 0
@@ -164,19 +174,38 @@ def evaluate(model: nn.Module,
     data_size = len(data_loader.dataset)
     number_of_batches = len(data_loader)
 
+    i_c = 0
+
     loss = 0
     correct = 0
     with torch.no_grad():
-        for images, labels in data_loader:
+        t1 = time.time()
+        for i, (images, labels) in enumerate(data_loader):
             images = images.to(device)
             labels = labels.to(device)
 
             prediction = model(images)
             loss += loss_fn(prediction, labels).item()
-            correct += (prediction.argmax(1) == labels).type(torch.float).sum().item()
+            correct += (prediction.argmax(1) ==
+                        labels).type(torch.float).sum().item()
+
+            i_c += 1
+            if (i % 10 == 9) or i == number_of_batches - 1:
+                time_taken = time.time() - t1
+                remaining_time = (time_taken / i_c) * (number_of_batches - i)
+                remaining_minutes = int(remaining_time // 60)
+                remaining_seconds = int(remaining_time % 60)
+                print(f'\r{i + 1}/{number_of_batches}, time_taken: {time_taken:.2f}'
+                      f', predicting_remaining_time: {
+                      remaining_minutes:d}m {remaining_seconds:02d}s',
+                      end='')
+                i_c = 0
+                t1 = time.time()
 
         loss /= number_of_batches
         correct /= data_size
+
+    print()
 
     return correct, loss
 
@@ -208,7 +237,8 @@ def predict(model: nn.Module,
                 prediction = model(image_tensor)
             prediction = torch.argmax(prediction)
 
-            result['image_path'].append(f'{image_path.parent.name} / f{image_path.name}')
+            result['image_path'].append(
+                f'{image_path.parent.name} / f{image_path.name}')
             result['prediction'].append(prediction.detach().cpu().numpy())
 
     return pd.DataFrame(result)
